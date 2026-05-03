@@ -5,8 +5,11 @@ import os
 import re
 import tempfile
 from collections import Counter
+from html import escape
 from pathlib import Path
 from typing import Any
+
+os.environ.setdefault("MPLCONFIGDIR", str(Path(tempfile.gettempdir()) / "matplotlib"))
 
 from dotenv import load_dotenv
 
@@ -59,7 +62,7 @@ except ImportError:  # pragma: no cover
     SentenceTransformer = None
 
 
-APP_TITLE = "Lyrics Emotion Analysis Assistant"
+APP_TITLE = "Emotion-Aware Music Analysis System"
 ROOT_DIR = Path(__file__).resolve().parent
 ENV_PATH = ROOT_DIR / ".env"
 DATASET_NAME = "theelderemo/genius-lyrics-cleaned"
@@ -78,6 +81,264 @@ _faiss_startup_attempted = False
 _mood_cluster_model: Any | None = None
 
 load_dotenv(ENV_PATH, override=False)
+
+MISSING_DISPLAY_VALUES = {
+    "",
+    "n/a",
+    "na",
+    "none",
+    "null",
+    "nan",
+    "not found",
+    "unknown",
+}
+
+SPOTIFY_CSS = """
+:root {
+    --app-bg: #121212;
+    --panel-bg: #181818;
+    --panel-soft: #202020;
+    --panel-border: rgba(255, 255, 255, 0.08);
+    --text-primary: #ffffff;
+    --text-secondary: #b3b3b3;
+    --accent: #1db954;
+    --accent-soft: rgba(29, 185, 84, 0.16);
+    --purple: #8b5cf6;
+}
+
+.gradio-container {
+    background: radial-gradient(circle at top left, rgba(29, 185, 84, 0.13), transparent 34%),
+        var(--app-bg) !important;
+    color: var(--text-primary) !important;
+    font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+.app-shell {
+    max-width: 1180px;
+    margin: 0 auto;
+    padding: 28px 18px 44px;
+}
+
+.hero {
+    padding: 28px;
+    border-radius: 24px;
+    background: linear-gradient(135deg, rgba(29, 185, 84, 0.18), rgba(139, 92, 246, 0.13)),
+        #181818;
+    border: 1px solid var(--panel-border);
+    box-shadow: 0 18px 60px rgba(0, 0, 0, 0.36);
+}
+
+.hero h1 {
+    margin: 0 0 10px;
+    font-size: clamp(2rem, 4vw, 3.8rem);
+    line-height: 1;
+    letter-spacing: 0;
+    color: var(--text-primary);
+}
+
+.hero p {
+    margin: 0;
+    color: var(--text-secondary);
+    font-size: 1.04rem;
+    line-height: 1.6;
+    max-width: 760px;
+}
+
+.section-title h2,
+.section-title h3 {
+    color: var(--text-primary);
+    margin-bottom: 8px;
+}
+
+.input-card,
+.track-card-shell,
+.metric-card,
+.plot-card,
+.similar-card,
+.details-card {
+    background: rgba(24, 24, 24, 0.96);
+    border: 1px solid var(--panel-border);
+    border-radius: 22px;
+    padding: 22px;
+    box-shadow: 0 14px 40px rgba(0, 0, 0, 0.22);
+}
+
+.input-card textarea,
+.input-card input {
+    background: #0f0f0f !important;
+    color: var(--text-primary) !important;
+    border-color: rgba(255, 255, 255, 0.12) !important;
+}
+
+.input-card label,
+.metric-card label,
+.plot-card label {
+    color: var(--text-secondary) !important;
+}
+
+.analyze-button {
+    border-radius: 999px !important;
+    background: var(--accent) !important;
+    color: #06170c !important;
+    font-weight: 800 !important;
+    border: 0 !important;
+    min-height: 48px;
+}
+
+.status-text {
+    color: var(--text-secondary);
+    min-height: 32px;
+}
+
+.track-card {
+    display: grid;
+    grid-template-columns: minmax(180px, 260px) minmax(0, 1fr);
+    gap: 26px;
+    align-items: center;
+}
+
+.cover-frame {
+    width: 100%;
+    aspect-ratio: 1;
+    border-radius: 20px;
+    overflow: hidden;
+    background: linear-gradient(135deg, #2a2a2a, #101010);
+    box-shadow: 0 22px 54px rgba(0, 0, 0, 0.44);
+}
+
+.cover-frame img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+}
+
+.cover-placeholder {
+    width: 100%;
+    height: 100%;
+    display: grid;
+    place-items: center;
+    color: rgba(255, 255, 255, 0.68);
+    font-size: 3rem;
+}
+
+.track-kicker {
+    color: var(--accent);
+    font-weight: 800;
+    text-transform: uppercase;
+    font-size: 0.76rem;
+    letter-spacing: 0.12em;
+    margin-bottom: 10px;
+}
+
+.track-title {
+    color: var(--text-primary);
+    font-size: clamp(2rem, 5vw, 4.8rem);
+    line-height: 0.96;
+    font-weight: 900;
+    letter-spacing: 0;
+    margin-bottom: 12px;
+    overflow-wrap: anywhere;
+}
+
+.track-artist {
+    color: var(--text-secondary);
+    font-size: 1.08rem;
+    margin-bottom: 20px;
+}
+
+.pill-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    margin: 12px 0 18px;
+}
+
+.pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    border-radius: 999px;
+    padding: 8px 12px;
+    background: var(--panel-soft);
+    color: var(--text-primary);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    font-weight: 700;
+}
+
+.pill.accent {
+    background: var(--accent-soft);
+    color: #b9ffd0;
+    border-color: rgba(29, 185, 84, 0.26);
+}
+
+.pill.purple {
+    background: rgba(139, 92, 246, 0.16);
+    color: #ddd0ff;
+    border-color: rgba(139, 92, 246, 0.28);
+}
+
+.track-meta {
+    color: var(--text-secondary);
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px 16px;
+    font-size: 0.94rem;
+}
+
+.track-meta span {
+    background: rgba(255, 255, 255, 0.055);
+    border: 1px solid rgba(255, 255, 255, 0.07);
+    border-radius: 999px;
+    padding: 7px 10px;
+}
+
+.track-meta a {
+    color: #b9ffd0;
+    text-decoration: none;
+    font-weight: 700;
+}
+
+.metadata-note {
+    margin-top: 14px;
+    color: var(--text-secondary);
+    font-size: 0.92rem;
+}
+
+.slider-wrap .wrap {
+    background: transparent !important;
+}
+
+.plot-card img {
+    border-radius: 18px !important;
+}
+
+.similar-card,
+.details-card {
+    color: var(--text-primary);
+}
+
+.similar-card h3,
+.similar-card li,
+.details-card p,
+.details-card li {
+    color: var(--text-primary);
+}
+
+.details-card {
+    color: var(--text-secondary);
+}
+
+@media (max-width: 760px) {
+    .track-card {
+        grid-template-columns: 1fr;
+    }
+
+    .cover-frame {
+        max-width: 280px;
+    }
+}
+"""
 
 
 STOPWORDS = {
@@ -380,6 +641,20 @@ def tokenize(text: str) -> list[str]:
 
 def normalize_text(value: str) -> str:
     return re.sub(r"[^a-z0-9]+", "", value.lower())
+
+
+def safe_display(value: Any, fallback: str = "Unknown") -> str:
+    if value is None:
+        return fallback
+
+    if isinstance(value, float) and value != value:
+        return fallback
+
+    text = str(value).strip()
+    if text.lower() in MISSING_DISPLAY_VALUES:
+        return fallback
+
+    return text
 
 
 def clamp(value: float, minimum: float, maximum: float) -> float:
@@ -689,10 +964,10 @@ def format_embedding_recommendations(similar_songs: list[dict[str, Any]]) -> lis
 
 def build_dataset_song_data(row: dict[str, Any]) -> dict[str, str]:
     return {
-        "title": str(row.get("title", "")).strip(),
-        "artist": str(row.get("artist", "")).strip(),
-        "year": str(row.get("year", "n/a")).strip() or "n/a",
-        "tag": str(row.get("tag", "unknown")).strip() or "unknown",
+        "title": safe_display(row.get("title"), "Untitled song"),
+        "artist": safe_display(row.get("artist"), "Unknown artist"),
+        "year": safe_display(row.get("year"), "Unknown"),
+        "tag": safe_display(row.get("tag"), "Unknown"),
         "lyrics": clean_lyrics(str(row.get("lyrics", ""))),
         "source": f"Hugging Face dataset ({DATASET_NAME})",
     }
@@ -705,9 +980,9 @@ def build_dataset_not_found_result(artist: str, title: str, max_rows: int) -> di
         "and click Analyze again."
     )
     return {
-        "title": title,
-        "artist": artist,
-        "year": "n/a",
+        "title": safe_display(title, "Untitled song"),
+        "artist": safe_display(artist, "Unknown artist"),
+        "year": "Unknown",
         "tag": "not found",
         "lyrics": "",
         "source": f"Hugging Face dataset ({DATASET_NAME})",
@@ -771,8 +1046,8 @@ def search_lyrics_in_dataset(artist: str, title: str) -> dict[str, str]:
 
 
 def build_manual_song_data(artist: str, title: str, manual_lyrics: str) -> dict[str, str]:
-    artist_name = artist.strip() or "Unknown artist"
-    song_title = title.strip() or "Untitled song"
+    artist_name = safe_display(artist, "Unknown artist")
+    song_title = safe_display(title, "Untitled song")
     lyrics = clean_lyrics(manual_lyrics)
 
     if not lyrics:
@@ -781,7 +1056,7 @@ def build_manual_song_data(artist: str, title: str, manual_lyrics: str) -> dict[
     return {
         "title": song_title,
         "artist": artist_name,
-        "year": "n/a",
+        "year": "Unknown",
         "tag": "manual",
         "lyrics": lyrics,
         "source": "Manual lyrics paste",
@@ -839,7 +1114,7 @@ def get_album_artwork(artist: str, title: str) -> dict[str, str]:
 def empty_spotify_metadata_result() -> dict[str, Any]:
     return {
         "popularity": None,
-        "album_name": None,
+        "album": None,
         "duration": None,
     }
 
@@ -854,14 +1129,42 @@ def get_spotify_dataset() -> Any:
     return _spotify_dataset
 
 
-def format_duration(duration_ms: Any) -> str | None:
+def format_duration(duration_ms: Any) -> str:
+    if safe_display(duration_ms, "") == "":
+        return "Unknown"
+
+    if isinstance(duration_ms, str) and ":" in duration_ms:
+        return safe_display(duration_ms, "Unknown")
+
     try:
         total_seconds = int(duration_ms) // 1000
     except (TypeError, ValueError):
-        return None
+        return "Unknown"
+
+    if total_seconds <= 0:
+        return "Unknown"
 
     minutes, seconds = divmod(total_seconds, 60)
     return f"{minutes}:{seconds:02d}"
+
+
+def format_metadata_value(label: str, value: Any, fallback: str = "Unknown") -> str:
+    return f"{label}: {safe_display(value, fallback)}"
+
+
+def format_popularity(popularity: Any) -> str:
+    return safe_display(popularity, "Not available")
+
+
+def metadata_is_available(value: Any) -> bool:
+    return safe_display(value, "") != ""
+
+
+def metadata_unavailable_note(values: list[Any], threshold: int = 3) -> str:
+    missing_count = sum(1 for value in values if not metadata_is_available(value))
+    if missing_count >= threshold:
+        return '<div class="metadata-note">Metadata unavailable for this track</div>'
+    return ""
 
 
 def get_spotify_metadata(artist: str, title: str) -> dict[str, Any]:
@@ -908,12 +1211,12 @@ def get_spotify_metadata(artist: str, title: str) -> dict[str, Any]:
 
 def interpret_spotify_popularity(popularity: Any) -> str:
     if popularity is None:
-        return "n/a"
+        return "Not available"
 
     try:
         popularity_score = int(popularity)
     except (TypeError, ValueError):
-        return "n/a"
+        return "Not available"
 
     if popularity_score > 70:
         return "high popularity"
@@ -1323,68 +1626,344 @@ Similar / Recommended Songs:
 """
 
 
+def get_display_similar_songs(analysis: dict[str, Any]) -> list[str]:
+    similar_songs = list(analysis.get("similar_recommended_songs", [])[:5])
+    if len(similar_songs) < 3:
+        fallback_songs = recommend_similar_songs(
+            analysis.get("dominant_emotion", "melancholy"),
+            analysis.get("key_themes", []),
+        )
+        similar_songs.extend(fallback_songs[len(similar_songs):])
+    return similar_songs[:5]
+
+
+def format_similar_songs_markdown(similar_songs: list[str]) -> str:
+    if not similar_songs:
+        return "### 🎵 Similar Songs\nRun an analysis to generate recommendations."
+    items = "\n".join(f"{index}. {song}" for index, song in enumerate(similar_songs, start=1))
+    return f"### 🎵 Similar Songs\n{items}"
+
+
+def build_album_cover_html(song_data: dict[str, Any]) -> str:
+    title = escape(safe_display(song_data.get("title"), "Analyzed song"), quote=True)
+    artwork_url = str(song_data.get("artwork_url", "")).strip()
+    if artwork_url:
+        safe_artwork_url = escape(artwork_url, quote=True)
+        return f'<div class="cover-frame"><img src="{safe_artwork_url}" alt="{title} album cover"></div>'
+    return '<div class="cover-frame"><div class="cover-placeholder">🎵</div></div>'
+
+
+def build_track_card_html(
+    song_data: dict[str, Any] | None = None,
+    analysis: dict[str, Any] | None = None,
+    mood_cluster: dict[str, str] | None = None,
+) -> str:
+    if not song_data or not analysis or not mood_cluster:
+        return """
+        <div class="track-card">
+            <div class="cover-frame"><div class="cover-placeholder">🎧</div></div>
+            <div>
+                <div class="track-kicker">Ready when you are</div>
+                <div class="track-title">Search a song</div>
+                <div class="track-artist">Enter artist and title, or paste lyrics manually.</div>
+                <div class="pill-row">
+                    <span class="pill accent">💚 Gemini emotion analysis</span>
+                    <span class="pill purple">📍 Valence-arousal map</span>
+                    <span class="pill">🎵 Similarity recommendations</span>
+                </div>
+            </div>
+        </div>
+        """
+
+    title_text = safe_display(song_data.get("title"), "Untitled song")
+    artist_text = safe_display(song_data.get("artist"), "Unknown artist")
+    title = escape(title_text)
+    artist = escape(artist_text)
+    emotion = escape(str(analysis.get("dominant_emotion_category", "melancholy")).title())
+    confidence = clamp(float(analysis.get("emotion_confidence", 0.0)), 0.0, 1.0)
+    confidence_percent = int(round(confidence * 100))
+    mood_label = escape(str(mood_cluster.get("cluster_label", "mixed or reflective")).title())
+    source = safe_display(song_data.get("source"), "Runtime analysis")
+    album = safe_display(
+        song_data.get("collection_name") or song_data.get("album"),
+        "Not available",
+    )
+    duration = format_duration(song_data.get("duration"))
+    popularity = format_popularity(song_data.get("popularity"))
+    year = safe_display(song_data.get("year"), "Unknown")
+    metadata_note = metadata_unavailable_note(
+        [
+            song_data.get("collection_name") or song_data.get("album"),
+            song_data.get("duration"),
+            song_data.get("popularity"),
+            song_data.get("artist"),
+            song_data.get("year"),
+        ],
+        threshold=3,
+    )
+    track_link = str(song_data.get("track_view_url", "")).strip()
+    link_html = ""
+    if track_link:
+        safe_track_link = escape(track_link, quote=True)
+        link_html = f'<span><a href="{safe_track_link}" target="_blank" rel="noopener noreferrer">Open in iTunes</a></span>'
+
+    return f"""
+    <div class="track-card">
+        {build_album_cover_html(song_data)}
+        <div>
+            <div class="track-kicker">Analyzed Track</div>
+            <div class="track-title">{title}</div>
+            <div class="track-artist">{artist}</div>
+            <div class="pill-row">
+                <span class="pill accent">💚 {emotion}</span>
+                <span class="pill purple">🔥 {confidence_percent}% confidence</span>
+                <span class="pill">📍 {mood_label}</span>
+            </div>
+            <div class="track-meta">
+                <span>{escape(format_metadata_value("Album", album, "Not available"))}</span>
+                <span>{escape(format_metadata_value("Duration", duration))}</span>
+                <span>{escape(format_metadata_value("Popularity", popularity, "Not available"))}</span>
+                <span>{escape(format_metadata_value("Artist", artist_text))}</span>
+                <span>{escape(format_metadata_value("Year", year))}</span>
+                <span>{escape(format_metadata_value("Source", source))}</span>
+                {link_html}
+            </div>
+            {metadata_note}
+        </div>
+    </div>
+    """
+
+
+def run_full_analysis(artist: str, title: str, manual_lyrics: str = "") -> dict[str, Any]:
+    if manual_lyrics.strip():
+        song_data = build_manual_song_data(artist, title, manual_lyrics)
+    else:
+        song_data = search_lyrics_in_dataset(artist=artist, title=title)
+        if not song_data.get("lyrics"):
+            raise LookupError(song_data.get("message", "Song lyrics were not found."))
+
+    song_data.update(get_album_artwork(song_data["artist"], song_data["title"]))
+    song_data.update(get_spotify_metadata(song_data["artist"], song_data["title"]))
+
+    analysis = analyze_song_lyrics(song_data)
+    similar_songs = get_similar_songs_faiss(song_data["lyrics"], top_k=5)
+    if similar_songs:
+        analysis["similar_recommended_songs"] = format_embedding_recommendations(similar_songs)
+
+    mood_cluster = assign_mood_cluster(analysis.get("valence"), analysis.get("arousal"))
+    try:
+        plot_path = create_valence_arousal_plot(
+            analysis.get("valence"),
+            analysis.get("arousal"),
+            song_data["title"],
+        )
+    except Exception:
+        plot_path = None
+
+    return {
+        "song_data": song_data,
+        "analysis": analysis,
+        "mood_cluster": mood_cluster,
+        "plot_path": plot_path,
+        "formatted_analysis": format_analysis(song_data, analysis),
+        "similar_songs": get_display_similar_songs(analysis),
+    }
+
+
 def analyze_request(artist: str, title: str, manual_lyrics: str = "") -> tuple[str, str | None]:
     try:
-        if manual_lyrics.strip():
-            song_data = build_manual_song_data(artist, title, manual_lyrics)
-        else:
-            song_data = search_lyrics_in_dataset(artist=artist, title=title)
-            if not song_data.get("lyrics"):
-                return f"## Song Not Found\n\n{song_data['message']}", None
-        song_data.update(get_album_artwork(song_data["artist"], song_data["title"]))
-        song_data.update(get_spotify_metadata(song_data["artist"], song_data["title"]))
-        analysis = analyze_song_lyrics(song_data)
-        similar_songs = get_similar_songs_faiss(song_data["lyrics"], top_k=5)
-        if similar_songs:
-            analysis["similar_recommended_songs"] = format_embedding_recommendations(similar_songs)
-        try:
-            plot_path = create_valence_arousal_plot(
-                analysis.get("valence"),
-                analysis.get("arousal"),
-                song_data["title"],
-            )
-        except Exception:
-            plot_path = None
-        return format_analysis(song_data, analysis), plot_path
+        result = run_full_analysis(artist, title, manual_lyrics)
+        return result["formatted_analysis"], result["plot_path"]
+    except LookupError as exc:
+        return f"## Song Not Found\n\n{exc}", None
     except Exception as exc:
         return f"## Error\n\n{exc}", None
 
 
+def empty_ui_values(status_message: str) -> tuple[str, str, float, float, str | None, str, str]:
+    return (
+        status_message,
+        build_track_card_html(),
+        0.0,
+        0.0,
+        None,
+        "### 🎵 Similar Songs\nRun an analysis to generate recommendations.",
+        "",
+    )
+
+
+def analyze_request_ui(
+    artist: str,
+    title: str,
+    manual_lyrics: str = "",
+) -> tuple[str, str, float, float, str | None, str, str]:
+    try:
+        result = run_full_analysis(artist, title, manual_lyrics)
+    except LookupError as exc:
+        return empty_ui_values(f"### ⚠️ Song Not Found\n{exc}")
+    except Exception as exc:
+        return empty_ui_values(f"### ⚠️ Error\n{exc}")
+
+    song_data = result["song_data"]
+    analysis = result["analysis"]
+    mood_cluster = result["mood_cluster"]
+    valence = round(clamp(float(analysis.get("valence", 0.0)), 0.0, 1.0), 2)
+    arousal = round(clamp(float(analysis.get("arousal", 0.0)), 0.0, 1.0), 2)
+    status = (
+        f"✅ Analysis complete · {analysis.get('analysis_method', 'runtime analysis')} · "
+        f"{mood_cluster['cluster_label']}"
+    )
+    return (
+        status,
+        build_track_card_html(song_data, analysis, mood_cluster),
+        valence,
+        arousal,
+        result["plot_path"],
+        format_similar_songs_markdown(result["similar_songs"]),
+        result["formatted_analysis"],
+    )
+
+
+def set_analysis_loading() -> tuple[Any, str]:
+    return (
+        gr.update(value="Analyzing...", interactive=False),
+        "⏳ Searching lyrics, analyzing emotion, and building the map...",
+    )
+
+
+def reset_analysis_button() -> Any:
+    return gr.update(value="Analyze Track", interactive=True)
+
+
+def gradio_uses_launch_css() -> bool:
+    try:
+        major_version = int(str(gr.__version__).split(".", maxsplit=1)[0])
+    except (AttributeError, TypeError, ValueError):
+        return False
+    return major_version >= 6
+
+
 def build_app() -> Any:
     require_dependency(gr, "gradio")
-    initialize_faiss_recommendations()
+    blocks_kwargs = {"title": APP_TITLE}
+    if not gradio_uses_launch_css():
+        blocks_kwargs["css"] = SPOTIFY_CSS
 
-    with gr.Blocks(title=APP_TITLE) as demo:
-        gr.Markdown(
-            f"""
-            # {APP_TITLE}
-            Search lyrics from the public Hugging Face dataset `{DATASET_NAME}` using streaming mode,
-            or paste lyrics manually if a song is not found. Lyrics are analyzed in memory only.
-            """
-        )
+    with gr.Blocks(**blocks_kwargs) as demo:
+        with gr.Column(elem_classes=["app-shell"]):
+            gr.HTML(
+                """
+                <section class="hero">
+                    <h1>🎧 Emotion-Aware Music Analysis System</h1>
+                    <p>
+                        Search lyrics, run Gemini-powered emotion analysis, map the track into
+                        valence-arousal space, and discover similar songs in a polished music-app workflow.
+                    </p>
+                </section>
+                """
+            )
 
-        artist_input = gr.Textbox(label="Artist Name", placeholder="Adele")
-        title_input = gr.Textbox(label="Song Title", placeholder="Hello")
-        manual_lyrics_input = gr.Textbox(
-            label="Manual Lyrics Paste",
-            lines=8,
-            placeholder="If the dataset does not find the song, paste the lyrics here and click Analyze.",
-        )
-        gr.Markdown(
-            "The app searches the streamed dataset first. If no match is found in the initial streamed window, paste the lyrics manually and run the analysis again."
-        )
-        analyze_button = gr.Button("Analyze", variant="primary")
-        output = gr.Markdown(label="Output")
-        plot_output = gr.Image(label="Valence / Arousal Map", type="filepath")
+            with gr.Row(equal_height=False):
+                with gr.Column(scale=4, elem_classes=["input-card"]):
+                    gr.Markdown("## 🎵 Track Input", elem_classes=["section-title"])
+                    artist_input = gr.Textbox(
+                        label="Artist name",
+                        placeholder="Adele",
+                    )
+                    title_input = gr.Textbox(
+                        label="Song title",
+                        placeholder="Hello",
+                    )
+                    gr.Markdown("**OR paste lyrics manually**")
+                    manual_lyrics_input = gr.Textbox(
+                        label="Manual lyrics input",
+                        lines=9,
+                        placeholder="Paste lyrics here if the dataset search does not find the song.",
+                    )
+                    analyze_button = gr.Button(
+                        "Analyze Track",
+                        variant="primary",
+                        elem_classes=["analyze-button"],
+                    )
+                    status_output = gr.Markdown(
+                        "Ready. Search a song or paste lyrics to begin.",
+                        elem_classes=["status-text"],
+                    )
 
-        analyze_button.click(
-            fn=analyze_request,
-            inputs=[artist_input, title_input, manual_lyrics_input],
-            outputs=[output, plot_output],
-        )
+                with gr.Column(scale=6, elem_classes=["track-card-shell"]):
+                    gr.Markdown("## Now Analyzing", elem_classes=["section-title"])
+                    track_card_output = gr.HTML(build_track_card_html())
+
+            with gr.Row(equal_height=False):
+                with gr.Column(scale=4, elem_classes=["metric-card"]):
+                    gr.Markdown("## 💚 Emotion Metrics", elem_classes=["section-title"])
+                    valence_output = gr.Slider(
+                        minimum=0.0,
+                        maximum=1.0,
+                        value=0.0,
+                        step=0.01,
+                        label="Valence (0 = negative, 1 = positive)",
+                        interactive=False,
+                        elem_classes=["slider-wrap"],
+                    )
+                    arousal_output = gr.Slider(
+                        minimum=0.0,
+                        maximum=1.0,
+                        value=0.0,
+                        step=0.01,
+                        label="Arousal (0 = calm, 1 = energetic)",
+                        interactive=False,
+                        elem_classes=["slider-wrap"],
+                    )
+
+                with gr.Column(scale=6, elem_classes=["plot-card"]):
+                    gr.Markdown("## 📍 Emotion Space", elem_classes=["section-title"])
+                    plot_output = gr.Image(
+                        label="Valence / Arousal Map",
+                        type="filepath",
+                        height=420,
+                    )
+
+            with gr.Row(equal_height=False):
+                with gr.Column(scale=5, elem_classes=["similar-card"]):
+                    similar_songs_output = gr.Markdown(
+                        "### 🎵 Similar Songs\nRun an analysis to generate recommendations."
+                    )
+
+                with gr.Column(scale=7, elem_classes=["details-card"]):
+                    with gr.Accordion("Detailed Structured Output", open=False):
+                        detailed_output = gr.Markdown()
+
+            analysis_flow = analyze_button.click(
+                fn=set_analysis_loading,
+                outputs=[analyze_button, status_output],
+                queue=False,
+            )
+            analysis_flow = analysis_flow.then(
+                fn=analyze_request_ui,
+                inputs=[artist_input, title_input, manual_lyrics_input],
+                outputs=[
+                    status_output,
+                    track_card_output,
+                    valence_output,
+                    arousal_output,
+                    plot_output,
+                    similar_songs_output,
+                    detailed_output,
+                ],
+            )
+            analysis_flow.then(
+                fn=reset_analysis_button,
+                outputs=analyze_button,
+                queue=False,
+            )
 
     return demo
 
 
 if __name__ == "__main__":
-    build_app().launch()
+    queued_demo = build_app().queue()
+    if gradio_uses_launch_css():
+        queued_demo.launch(css=SPOTIFY_CSS)
+    else:
+        queued_demo.launch()
