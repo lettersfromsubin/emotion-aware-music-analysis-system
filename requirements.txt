@@ -1,0 +1,9 @@
+datasets
+faiss-cpu
+google-genai
+gradio
+matplotlib
+python-dotenv
+requests
+scikit-learn
+sentence-transformers
