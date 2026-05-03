@@ -1,55 +1,143 @@
-# lyrics-emotion-analysis-assistant
+# 🎧 Emotion-Aware Music Analysis System
 
-A simple Gradio app for finding song lyrics in the public Hugging Face dataset `theelderemo/genius-lyrics-cleaned` and generating an emotion-focused analysis with Gemini.
+An AI-powered system for analyzing song lyrics using LLMs and mapping them into a structured emotion space (valence–arousal), enabling intelligent music understanding, interpretation, and recommendation.
 
-The app no longer depends on live Genius retrieval as its main workflow. That change makes the project more stable because live Genius scraping can be blocked by Cloudflare. Lyrics are used only at runtime for educational and research-style analysis.
+---
 
-## Tech Stack
+## 🚀 Live Demo
 
-- Python
-- Hugging Face Datasets
-- Gemini API (`google-genai`)
-- FAISS (`faiss-cpu`)
-- scikit-learn
-- matplotlib
-- Sentence Transformers
-- Gradio
-- python-dotenv
-- requests
-- iTunes Search API
-- Spotify Tracks Dataset on Hugging Face
+👉 Hugging Face Space:  
+https://huggingface.co/spaces/ALEXJK0901/emotion-aware-music-analysis-system
 
-## Features
+---
 
-- Stream-search the public dataset `theelderemo/genius-lyrics-cleaned`
-- Avoid downloading the full dataset up front by using `streaming=True`
-- Match songs by artist and title with case-insensitive search
-- Return title, artist, year, tag, and lyrics when a match is found
-- Fall back to manual lyrics paste when the song is not found in the initial streamed window
-- Use `GEMINI_API_KEY` for structured lyrics analysis
-- Include emotion confidence scoring and a short justification for the selected emotion
-- Restrict dominant emotion labels to a fixed portfolio-friendly taxonomy
-- Fall back to a simple rule-based analysis if Gemini is unavailable
-- Optionally show album artwork, album/collection name, and an iTunes track link from the free iTunes Search API
-- Add Spotify-style track metadata from the public Hugging Face dataset `maharshipandya/spotify-tracks-dataset`
-- Use FAISS vector search for faster embedding-based similar song recommendations, with cosine similarity as fallback
-- Assign a lightweight valence-arousal mood cluster such as sad/calm, energetic/joyful, warm/peaceful, tense/angry, or mixed/reflective
-- Show a simple valence-arousal emotion-space map for the analyzed song
+## 🚀 Key Highlights
 
-## Project Structure
+* LLM-based emotion analysis using **Gemini**
+* Hybrid affective modeling (**semantic emotion + numeric space + consistency layer**)
+* Emotion-to-valence/arousal mapping (psychological model)
+* Post-processing calibration for **affective consistency**
+* FAISS-powered similarity search for recommendations
+* Emotion-space visualization (valence–arousal map)
+* Multi-source integration (lyrics + Spotify-style metadata + iTunes)
 
-```text
+---
+
+## 🧠 System Architecture
+
+### 1. Lyrics Retrieval
+* Hugging Face dataset streaming (`theelderemo/genius-lyrics-cleaned`)
+* No full dataset download required
+
+### 2. Emotion Analysis (LLM)
+* Gemini API
+* Structured output:
+  * Emotion category
+  * Emotion nuance
+  * Confidence score
+  * Raw valence & arousal
+
+### 3. Affective Calibration Layer (Key Contribution)
+
+A lightweight post-processing module ensures **structural consistency between emotion category and numeric representation**.
+
+Includes:
+* Emotion-to-valence/arousal mapping
+* Adaptive blending between model output and mapping
+* Low-arousal emotion constraints (e.g., longing, nostalgia, melancholy)
+* Cluster override rules for edge cases
+
+This prevents inconsistencies such as:
+> “longing” being classified as “tense/angry”
+
+### 4. Emotion Modeling
+
+Hybrid pipeline:
+* LLM → semantic emotion understanding
+* Mapping → numeric representation
+* Calibration → consistency correction
+* Rules → stability and interpretability
+
+### 5. Mood Clustering
+
+Valence–arousal space is mapped into:
+* sad / calm  
+* energetic / joyful  
+* peaceful / warm  
+* tense / angry  
+* mixed / reflective  
+
+### 6. Recommendation Engine
+
+* Sentence Transformers embeddings
+* FAISS vector search
+* Cosine similarity fallback
+
+### 7. Visualization
+
+* Emotion-space plotting (valence vs arousal)
+* Real-time position of the analyzed song
+
+---
+
+## 🎯 Use Cases
+
+* Emotion-aware music recommendation systems
+* AI-powered content analysis for entertainment platforms
+* Playlist generation based on emotional context
+* Creative support for music production
+* Decision-support systems for media platforms 
+---
+
+## 🛠 Tech Stack
+
+* Python
+* Hugging Face Datasets
+* Gemini API (google-genai)
+* FAISS (faiss-cpu)
+* Sentence Transformers
+* scikit-learn
+* matplotlib
+* Gradio
+* python-dotenv
+* requests
+* iTunes Search API
+* Spotify Tracks Dataset (Hugging Face)
+
+---
+
+## ⚙️ Features
+
+* Stream-search lyrics dataset using `streaming=True`
+* Case-insensitive artist/title matching
+* Manual lyrics fallback
+* Structured LLM-based emotion analysis
+* Emotion confidence + justification
+* Controlled emotion taxonomy (portfolio-ready)
+* Affective calibration for consistency
+* Rule-based fallback if LLM unavailable
+* Spotify-style metadata enrichment
+* iTunes artwork integration
+* FAISS-based similar song recommendations
+* Emotion-space visualization
+
+---
+
+## 📂 Project Structure
+
+```
 lyrics-emotion-analysis-assistant/
 ├── app.py
 ├── requirements.txt
 ├── README.md
-├── .env
 ├── .gitignore
 ├── screenshots/
 └── vectorstore/
 ```
 
-## Setup
+---
+
+## 🔧 Setup
 
 ```bash
 cd lyrics-emotion-analysis-assistant
@@ -58,45 +146,92 @@ source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
-Create or update `.env`:
+Create `.env`:
 
-```env
+```
 GEMINI_API_KEY=your_gemini_api_key
 GEMINI_MODEL=gemini-2.5-flash
 HF_DATASET_SEARCH_LIMIT=50000
 ```
 
-## How It Works
+---
 
-1. The app streams rows from the public Hugging Face dataset `theelderemo/genius-lyrics-cleaned`.
-2. It searches for a case-insensitive artist/title match without downloading the full dataset at startup.
-3. It optionally looks up album artwork metadata through the free iTunes Search API.
-4. It optionally matches the song against `maharshipandya/spotify-tracks-dataset` for popularity, album, and duration metadata.
-5. If a match is found, the lyrics are analyzed in memory.
-6. If a match is not found in the initial streamed window, you can paste the lyrics manually and analyze them directly.
-
-## Spotify Dataset Metadata
-
-The app does not use the Spotify API. It loads the public Hugging Face dataset `maharshipandya/spotify-tracks-dataset` and matches by `track_name` and `artists` with case-insensitive search. When available, the output shows popularity, album, duration, and a simple popularity interpretation.
-
-## Optional Album Artwork
-
-The app uses the public iTunes Search API to fetch album artwork and basic track metadata. This does not require authentication and does not use the Spotify API. If iTunes does not return a result, the analysis still works without artwork.
-
-## Why Live Genius Retrieval Was Removed
-
-Earlier versions used live Genius retrieval, but that approach was unreliable because Genius can block automated requests with Cloudflare. This refactor makes the app more stable and easier to demo in a portfolio setting by using a public dataset as the primary source instead.
-
-## Runtime-Only Lyrics Usage
-
-- Lyrics are used only during runtime for educational and research analysis.
-- The app does not save lyrics to files or a database.
-- Manual lyrics pasted into the UI are processed in memory for the current request only.
-
-## Run the App
+## ▶️ Run the App
 
 ```bash
 python3 app.py
 ```
 
-Then open the local Gradio URL shown in the terminal.
+Open the local Gradio URL shown in the terminal.
+
+---
+
+## 🔍 How It Works
+
+* Streams data from Hugging Face dataset (no full download)
+* Matches songs by artist/title
+* Enriches metadata via:
+  * iTunes API (artwork, album)
+  * Spotify dataset (popularity, duration)
+* Performs real-time LLM analysis
+* Applies calibration layer for consistency
+* Generates structured emotional insights
+* Finds similar songs via embeddings
+* Visualizes emotion in valence–arousal space
+
+---
+
+## 🎵 Spotify Dataset Integration
+
+* Dataset: `maharshipandya/spotify-tracks-dataset`
+* No Spotify API required
+* Matching via track name + artist
+* Outputs:
+  * popularity
+  * album
+  * duration
+  * interpretation
+
+---
+
+## 🖼 Optional Album Artwork
+
+* Uses iTunes Search API (no authentication)
+* Fetches album artwork and metadata
+* Fully optional
+
+---
+
+## ⚠️ Design Decision: No Live Genius Scraping
+
+Removed due to:
+* Cloudflare blocking
+* instability
+
+Replaced with:
+* public dataset → reproducibility and stability
+
+---
+
+## 🔒 Runtime-Only Lyrics Usage
+
+* Lyrics processed only in memory
+* No storage or persistence
+* Manual input not saved
+* Designed for research/educational use
+
+---
+
+## 📊 Future Improvements
+
+* Probabilistic emotion mapping (soft consistency)
+* Full dataset indexing
+* Multilingual support
+* Advanced clustering
+* Real-time API integrations
+
+---
+
+## 👨‍💻 Author
+
+Developed as part of an LLM-based content intelligence system for emotion-aware analysis and recommendation.
