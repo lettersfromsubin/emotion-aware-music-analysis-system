@@ -470,6 +470,26 @@ ALLOWED_EMOTIONS = (
     "fear",
 )
 
+EMOTION_VA_MAPPING = {
+    "joy": {"valence": 0.85, "arousal": 0.70},
+    "sadness": {"valence": 0.20, "arousal": 0.30},
+    "nostalgia": {"valence": 0.55, "arousal": 0.40},
+    "longing": {"valence": 0.45, "arousal": 0.40},
+    "anger": {"valence": 0.20, "arousal": 0.85},
+    "confidence": {"valence": 0.80, "arousal": 0.75},
+    "melancholy": {"valence": 0.30, "arousal": 0.35},
+    "hope": {"valence": 0.75, "arousal": 0.55},
+    "love": {"valence": 0.80, "arousal": 0.55},
+    "tension": {"valence": 0.35, "arousal": 0.80},
+    "desire": {"valence": 0.70, "arousal": 0.65},
+    "regret": {"valence": 0.25, "arousal": 0.40},
+    "loneliness": {"valence": 0.20, "arousal": 0.30},
+    "freedom": {"valence": 0.85, "arousal": 0.75},
+    "fear": {"valence": 0.15, "arousal": 0.80},
+}
+
+LOW_AROUSAL_EMOTIONS = ["longing", "nostalgia", "melancholy"]
+
 EMOTION_LEXICONS = {
     "joy": {"celebrate", "dance", "free", "happy", "joy", "light", "smile", "sun"},
     "sadness": {"alone", "broken", "cry", "gone", "hurt", "sad", "tears"},
@@ -692,7 +712,7 @@ def get_mood_anchor_for_kmeans_cluster(model: Any, cluster_index: int) -> dict[s
     return MOOD_CLUSTER_ANCHORS[anchor_index]
 
 
-def assign_mood_cluster(valence: Any, arousal: Any) -> dict[str, str]:
+def assign_mood_cluster(valence: Any, arousal: Any, emotion: Any = None) -> dict[str, str]:
     try:
         normalized_valence = clamp(float(valence), 0.0, 1.0)
         normalized_arousal = clamp(float(arousal), 0.0, 1.0)
@@ -712,10 +732,18 @@ def assign_mood_cluster(valence: Any, arousal: Any) -> dict[str, str]:
     except Exception:
         cluster = get_nearest_mood_anchor(normalized_valence, normalized_arousal)
 
+    cluster_label = cluster["label"]
+    cluster_explanation = cluster["explanation"]
+    normalized_emotion = normalize_emotion_label(emotion) if emotion is not None else ""
+    if normalized_emotion in LOW_AROUSAL_EMOTIONS and normalized_valence < 0.5:
+        calm_anchor = next(anchor for anchor in MOOD_CLUSTER_ANCHORS if anchor["label"] == "sad or calm")
+        cluster_label = "sad/calm"
+        cluster_explanation = calm_anchor["explanation"]
+
     return {
-        "cluster_label": cluster["label"],
+        "cluster_label": cluster_label,
         "explanation": (
-            f"{cluster['explanation']} Detected valence: {normalized_valence:.2f}; "
+            f"{cluster_explanation} Detected valence: {normalized_valence:.2f}; "
             f"arousal: {normalized_arousal:.2f}."
         ),
     }
@@ -811,6 +839,44 @@ def normalize_emotion_label(value: Any) -> str:
         if allowed_emotion in emotion:
             return allowed_emotion
     return "melancholy"
+
+
+def calibrate_affective_values(emotion: Any, model_valence: Any, model_arousal: Any) -> tuple[float, float, str]:
+    normalized_emotion = normalize_emotion_label(emotion)
+    mapped_values = EMOTION_VA_MAPPING.get(normalized_emotion)
+    valence = clamp(float(model_valence), 0.0, 1.0)
+    arousal = clamp(float(model_arousal), 0.0, 1.0)
+
+    if not mapped_values:
+        return (
+            round(valence, 2),
+            round(arousal, 2),
+            "Model valence/arousal are consistent with the selected emotion category.",
+        )
+
+    calibrated_valence = valence
+    calibrated_arousal = arousal
+    adjusted = False
+
+    if abs(valence - mapped_values["valence"]) > 0.25:
+        calibrated_valence = (0.6 * mapped_values["valence"]) + (0.4 * valence)
+        adjusted = True
+
+    if abs(arousal - mapped_values["arousal"]) > 0.25:
+        calibrated_arousal = (0.6 * mapped_values["arousal"]) + (0.4 * arousal)
+        adjusted = True
+
+    calibration_note = (
+        "Valence/arousal adjusted toward the emotion mapping to improve affective consistency."
+        if adjusted
+        else "Model valence/arousal are consistent with the selected emotion category."
+    )
+
+    return (
+        round(clamp(calibrated_valence, 0.0, 1.0), 2),
+        round(clamp(calibrated_arousal, 0.0, 1.0), 2),
+        calibration_note,
+    )
 
 
 def normalize_sentiment_label(value: Any) -> str:
@@ -1573,10 +1639,52 @@ def analyze_song_lyrics(song_data: dict[str, str]) -> dict[str, Any]:
     return analyze_lyrics_rule_based(song_data["lyrics"])
 
 
-def format_analysis(song_data: dict[str, str], analysis: dict[str, Any]) -> str:
+def apply_affective_calibration(analysis: dict[str, Any]) -> dict[str, Any]:
+    model_valence = round(clamp(float(analysis.get("valence", 0.0)), 0.0, 1.0), 2)
+    model_arousal = round(clamp(float(analysis.get("arousal", 0.0)), 0.0, 1.0), 2)
+    normalized_emotion = normalize_emotion_label(
+        analysis.get("dominant_emotion_category", analysis.get("dominant_emotion", "melancholy"))
+    )
+    calibrated_valence, calibrated_arousal, calibration_note = calibrate_affective_values(
+        normalized_emotion,
+        model_valence,
+        model_arousal,
+    )
+    final_valence = calibrated_valence
+    final_arousal = calibrated_arousal
+
+    # Enforce affective consistency for low-arousal emotions
+    if normalized_emotion in LOW_AROUSAL_EMOTIONS:
+        capped_arousal = min(final_arousal, 0.49)
+        if capped_arousal != final_arousal:
+            final_arousal = capped_arousal
+            calibration_note = "Valence/arousal adjusted toward the emotion mapping to improve affective consistency."
+
+    analysis["model_valence"] = model_valence
+    analysis["model_arousal"] = model_arousal
+    analysis["calibrated_valence"] = calibrated_valence
+    analysis["calibrated_arousal"] = calibrated_arousal
+    analysis["final_valence"] = final_valence
+    analysis["final_arousal"] = final_arousal
+    analysis["calibration_note"] = calibration_note
+    analysis["valence"] = final_valence
+    analysis["arousal"] = final_arousal
+    return analysis
+
+
+def format_analysis(
+    song_data: dict[str, str],
+    analysis: dict[str, Any],
+    mood_cluster: dict[str, str] | None = None,
+) -> str:
     themes_text = ", ".join(analysis["key_themes"]) or "n/a"
     keywords_text = ", ".join(analysis["keywords"]) or "n/a"
-    mood_cluster = assign_mood_cluster(analysis.get("valence"), analysis.get("arousal"))
+    if mood_cluster is None:
+        mood_cluster = assign_mood_cluster(
+            analysis.get("final_valence", analysis.get("valence")),
+            analysis.get("final_arousal", analysis.get("arousal")),
+            analysis.get("dominant_emotion_category"),
+        )
     use_cases = list(analysis["recommendation_use_cases"][:3])
     default_use_cases = [
         "playlist mood tagging",
@@ -1608,6 +1716,11 @@ Sentiment: {analysis['sentiment']}
 Emotional Intensity: {analysis['emotional_intensity']}  
 Valence: {analysis['valence']}  
 Arousal: {analysis['arousal']}  
+Model Valence: {analysis.get('model_valence', analysis['valence'])}
+Model Arousal: {analysis.get('model_arousal', analysis['arousal'])}
+Final Valence: {analysis.get('final_valence', analysis['valence'])}
+Final Arousal: {analysis.get('final_arousal', analysis['arousal'])}
+Calibration Note: {analysis.get('calibration_note', 'Model valence/arousal are consistent with the selected emotion category.')}
 
 Mood Cluster:
 - Cluster Label: {mood_cluster['cluster_label']}
@@ -1745,16 +1858,20 @@ def run_full_analysis(artist: str, title: str, manual_lyrics: str = "") -> dict[
     song_data.update(get_album_artwork(song_data["artist"], song_data["title"]))
     song_data.update(get_spotify_metadata(song_data["artist"], song_data["title"]))
 
-    analysis = analyze_song_lyrics(song_data)
+    analysis = apply_affective_calibration(analyze_song_lyrics(song_data))
     similar_songs = get_similar_songs_faiss(song_data["lyrics"], top_k=5)
     if similar_songs:
         analysis["similar_recommended_songs"] = format_embedding_recommendations(similar_songs)
 
-    mood_cluster = assign_mood_cluster(analysis.get("valence"), analysis.get("arousal"))
+    mood_cluster = assign_mood_cluster(
+        analysis.get("final_valence"),
+        analysis.get("final_arousal"),
+        analysis.get("dominant_emotion_category"),
+    )
     try:
         plot_path = create_valence_arousal_plot(
-            analysis.get("valence"),
-            analysis.get("arousal"),
+            analysis.get("final_valence"),
+            analysis.get("final_arousal"),
             song_data["title"],
         )
     except Exception:
@@ -1765,7 +1882,7 @@ def run_full_analysis(artist: str, title: str, manual_lyrics: str = "") -> dict[
         "analysis": analysis,
         "mood_cluster": mood_cluster,
         "plot_path": plot_path,
-        "formatted_analysis": format_analysis(song_data, analysis),
+        "formatted_analysis": format_analysis(song_data, analysis, mood_cluster),
         "similar_songs": get_display_similar_songs(analysis),
     }
 
@@ -1807,8 +1924,8 @@ def analyze_request_ui(
     song_data = result["song_data"]
     analysis = result["analysis"]
     mood_cluster = result["mood_cluster"]
-    valence = round(clamp(float(analysis.get("valence", 0.0)), 0.0, 1.0), 2)
-    arousal = round(clamp(float(analysis.get("arousal", 0.0)), 0.0, 1.0), 2)
+    valence = round(clamp(float(analysis.get("final_valence", analysis.get("valence", 0.0))), 0.0, 1.0), 2)
+    arousal = round(clamp(float(analysis.get("final_arousal", analysis.get("arousal", 0.0))), 0.0, 1.0), 2)
     status = (
         f"✅ Analysis complete · {analysis.get('analysis_method', 'runtime analysis')} · "
         f"{mood_cluster['cluster_label']}"
