@@ -4,6 +4,18 @@ An AI-powered system for analyzing song lyrics using LLMs and mapping them into 
 
 ---
 
+### Role
+- AI System Architecture Design
+- LLM Pipeline Development
+- Emotion Modeling & Calibration Layer Design
+- Recommendation System Development (FAISS)
+- Backend Integration & Deployment
+
+### Contribution
+100% (Individual Project)
+
+---
+
 ## 🚀 Live Demo
 
 👉 Hugging Face Space:  
@@ -113,7 +125,7 @@ Valence–arousal space is mapped into:
 * Manual lyrics fallback
 * Structured LLM-based emotion analysis
 * Emotion confidence + justification
-* Controlled emotion taxonomy (portfolio-ready)
+* Controlled emotion taxonomy
 * Affective calibration for consistency
 * Rule-based fallback if LLM unavailable
 * Spotify-style metadata enrichment
@@ -232,6 +244,5 @@ Replaced with:
 
 ---
 
-## 👨‍💻 Author
 
 Developed as part of an LLM-based content intelligence system for emotion-aware analysis and recommendation.
